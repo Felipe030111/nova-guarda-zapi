@@ -9,4 +9,4 @@ COPY . .
 
 EXPOSE 3000
 
-CMD ["gunicorn", "-b", "0.0.0.0:5000", "app:create_app()", "--timeout", "60"]
+CMD ["gunicorn", "-b", "0.0.0.0:3000", "app:create_app()", "--timeout", "60"]
