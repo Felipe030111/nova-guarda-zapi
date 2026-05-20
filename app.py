@@ -16,6 +16,8 @@ from pyngrok.conf import PyngrokConfig
 from pyngrok.exception import PyngrokError
 
 
+load_dotenv(encoding="utf-8-sig")
+
 PORT = 3000
 WEBHOOK_PATH = "/webhook"
 ZAPI_BASE_URL = "https://api.z-api.io"
@@ -25,7 +27,7 @@ RECEIVED_EVENTS: deque[dict[str, Any]] = deque(maxlen=50)
 AGENDA_STATE: dict[str, dict[str, Any]] = {}
 TERMS_STATE: dict[str, dict[str, Any]] = {}
 LOCATION_LINKS: dict[str, dict[str, Any]] = {}
-PUBLIC_BASE_URL = ""
+PUBLIC_BASE_URL = os.getenv("PUBLIC_BASE_URL", "").strip().rstrip("/")
 TERMS_PDF_PATH = PROJECT_DIR / "termo_aceite_ficticio.pdf"
 TERMS_ACCEPTANCE_TEXT = "li e aceito os termos"
 TERMS_REJECTION_TEXT = "não aceito os termos"
@@ -684,6 +686,8 @@ def classify_checkin_reply(text: str) -> str | None:
     normalized = text.strip().lower()
     if normalized in {"sim, cheguei", "cheguei", "sim", "checkin_arrived"}:
         return "arrived"
+    if normalized in {"checkin2_arrived"}:
+        return "arrived_link"
     if normalized in {"vou atrasar", "atrasarei", "atrasar", "checkin_late"}:
         return "late"
     if normalized in {"não vou", "nao vou", "não irei", "nao irei", "checkin_not_going"}:
@@ -1179,7 +1183,7 @@ def send_zapi_terms_buttons(phone: str) -> dict[str, Any]:
     return payload
 
 
-def send_zapi_checkin_options(phone: str, message: str) -> dict[str, Any]:
+def send_zapi_checkin_options(phone: str, message: str, use_location_link: bool = False) -> dict[str, Any]:
     instance_id = get_required_env("ZAPI_INSTANCE_ID")
     instance_token = get_required_env("ZAPI_INSTANCE_TOKEN")
     client_token = get_required_env("ZAPI_CLIENT_TOKEN")
@@ -1203,9 +1207,9 @@ def send_zapi_checkin_options(phone: str, message: str) -> dict[str, Any]:
                 "buttonLabel": "Responder check-in",
                 "options": [
                     {
-                        "id": "checkin_arrived",
+                        "id": "checkin2_arrived" if use_location_link else "checkin_arrived",
                         "title": "Sim, cheguei",
-                        "description": "Confirmar chegada e enviar localização em seguida",
+                        "description": "Confirmar chegada e receber link de localização" if use_location_link else "Confirmar chegada e enviar localização em seguida",
                     },
                     {
                         "id": "checkin_late",
@@ -1511,7 +1515,14 @@ def create_app() -> Flask:
                 )
 
                 try:
-                    if checkin_decision == "arrived" and state.get("mode") == "checkin2":
+                    if checkin_decision == "arrived_link":
+                        location_url = create_location_link(phone)
+                        reply = (
+                            "Perfeito. Clique no link abaixo para confirmar sua localização:\n"
+                            f"{location_url}"
+                        )
+                        response_payload = send_zapi_text(phone, reply)
+                    elif checkin_decision == "arrived" and state.get("mode") == "checkin2":
                         location_url = create_location_link(phone)
                         reply = (
                             "Perfeito. Clique no link abaixo para confirmar sua localização:\n"
@@ -1725,7 +1736,11 @@ def create_app() -> Flask:
             if mode == "agenda":
                 response_payload = send_zapi_agenda_buttons(phone, message)
             elif mode in {"checkin", "checkin2"}:
-                response_payload = send_zapi_checkin_options(phone, message)
+                response_payload = send_zapi_checkin_options(
+                    phone,
+                    message,
+                    use_location_link=mode == "checkin2",
+                )
             elif mode == "terms":
                 response_payload = send_zapi_document(phone, TERMS_PDF_PATH, message)
                 send_zapi_terms_buttons(phone)
@@ -1778,7 +1793,8 @@ def main() -> None:
 
     try:
         public_url = start_ngrok_tunnel(PORT)
-        PUBLIC_BASE_URL = public_url
+        if not PUBLIC_BASE_URL:
+            PUBLIC_BASE_URL = public_url
         update_zapi_webhook(public_url)
 
     except (RuntimeError, PyngrokError, requests.RequestException) as exc:
