@@ -1,11 +1,8 @@
-.env
+﻿.env
 .venv/
-venv/
 __pycache__/
 *.pyc
-.pytest_cache/
-server.out.log
-server.err.log
+app_backup*.py
+VARREDURA_COMPLETA_NOVA_GUARDA_*.txt
+MAPEAMENTO_PROJETO_*.txt
 ngrok.exe
-app_backup_antes_ajuste_ngrok.py
-MAPEAMENTO_NOVA_GUARDA.txt

@@ -440,7 +440,7 @@ Esse aceite será registrado no sistema.`;
           ? `https://www.google.com/maps?q=${location.latitude},${location.longitude}`
           : location?.url || "";
         const body = location
-          ? `Localização recebida
+          ? `Localização recebida com data e hora
 Latitude: ${location.latitude ?? ""}
 Longitude: ${location.longitude ?? ""}
 Endereço: ${location.address || ""}`
@@ -618,10 +618,34 @@ LOCATION_HTML = """
           }),
         });
         const data = await response.json();
-        statusBox.textContent = data.message || "Localização enviada. Obrigado!";
-        button.disabled = true;
+        const confirmadoEm = data.confirmado_em || new Date().toLocaleString("pt-BR");
+
+        if (data.ok) {
+          statusBox.textContent = `Sua localização foi registrada com sucesso.
+Data/Hora: ${confirmadoEm}
+
+Esta janela será fechada automaticamente.`;
+
+          button.disabled = true;
+
+          setTimeout(() => {
+            window.close();
+
+            document.body.innerHTML = `
+              <div style="font-family: Arial, sans-serif; max-width: 520px; margin: 40px auto; padding: 24px; border-radius: 14px; background: #fff; box-shadow: 0 8px 24px rgba(0,0,0,.12); text-align: center;">
+                <h2>Check-in concluído ✅</h2>
+                <p>Sua localização foi registrada com sucesso.</p>
+                <p>Data/Hora: ${confirmadoEm}</p>
+                <p>Você já pode fechar esta janela.</p>
+              </div>
+            `;
+          }, 1800);
+        } else {
+          statusBox.textContent = data.message || "Não foi possível registrar sua localização.";
+          button.disabled = false;
+        }
       }, () => {
-        statusBox.textContent = "Não foi possível acessar sua localização. Verifique a permissão do navegador.";
+        statusBox.textContent = "Não foi possível acessar sua localização. Abra este link no Chrome/Safari e permita o acesso ao GPS.";
       }, {
         enableHighAccuracy: true,
         timeout: 15000,
@@ -686,8 +710,8 @@ def classify_agenda_reply(text: str) -> str | None:
 
 def classify_checkin_reply(text: str) -> str | None:
     normalized = text.strip().lower()
-    if normalized in {"sim, cheguei", "cheguei", "sim", "checkin_arrived"}:
-        return "arrived"
+    if normalized in {"sim, cheguei", "cheguei", "sim", "checkin_arrived", "checkin2_arrived"}:
+        return "arrived_link"
     if normalized in {"checkin2_arrived"}:
         return "arrived_link"
     if normalized in {"vou atrasar", "atrasarei", "atrasar", "checkin_late"}:
@@ -709,6 +733,17 @@ def classify_checkin_reply(text: str) -> str | None:
     if normalized in {"outro motivo", "reason_other"}:
         return "reason_other"
     return None
+
+
+def should_send_location_link(checkin_decision: str, state: dict[str, Any]) -> bool:
+    if checkin_decision == "arrived_link":
+        return True
+
+    if checkin_decision != "arrived":
+        return False
+
+    mode = state.get("mode")
+    return mode in {"checkin2", None}
 
 
 def is_terms_acceptance(text: str) -> bool:
@@ -748,7 +783,7 @@ def checkin_status_label(status: str) -> str:
     labels = {
         "checkin_sent": "Check-in enviado",
         "arrived": "Chegou ao local",
-        "location_received": "Localização recebida",
+        "location_received": "Localização recebida com data e hora",
         "location_requested": "Solicitou envio de localização",
         "late": "Aguardando tempo de atraso",
         "late_15": "Vai atrasar 15 minutos",
@@ -892,7 +927,7 @@ def build_checkin_reply(status: str) -> str:
     if status == "arrived":
         return "Perfeito, recebemos seu check-in. Agora envie sua localização atual pelo WhatsApp, por favor."
     if status == "location_received":
-        return "Localização recebida com sucesso. Obrigado!"
+        return "Localização recebida com data e hora com sucesso. Obrigado!"
     if status == "late":
         return "Sem problema. Informe quanto tempo deve atrasar."
     if status == "late_15":
@@ -1361,6 +1396,132 @@ def send_zapi_no_show_reasons(phone: str) -> dict[str, Any]:
     return payload
 
 
+
+def get_payload_summary(payload: dict[str, Any]) -> dict[str, Any]:
+    """
+    Transforma payloads brutos da Z-API em informações amigáveis para o painel/log.
+    """
+    event_type = payload.get("type") or payload.get("event") or "Evento desconhecido"
+    phone = payload.get("phone") or payload.get("from") or payload.get("sender") or ""
+
+    summary = {
+        "event_type": event_type,
+        "phone": phone,
+        "title": "Evento recebido",
+        "description": "Payload recebido da Z-API.",
+        "emoji": "📦",
+        "category": "technical",
+        "important": False,
+    }
+
+    # Status de mensagem enviada
+    if event_type == "MessageStatusCallback":
+        status = payload.get("status") or "STATUS_DESCONHECIDO"
+        ids = payload.get("ids") or []
+
+        status_label = {
+            "SENT": "enviada",
+            "RECEIVED": "recebida/entregue",
+            "READ": "lida",
+            "PLAYED": "áudio reproduzido",
+            "ERROR": "erro no envio",
+        }.get(status, status)
+
+        summary.update({
+            "title": f"Status da mensagem: {status_label}",
+            "description": f"Mensagem {status_label} para {phone}. ID: {', '.join(ids) if ids else 'sem ID'}",
+            "emoji": "✅" if status in {"SENT", "RECEIVED", "READ"} else "⚠️",
+            "category": "message_status",
+            "important": False,
+        })
+        return summary
+
+    # Presença/status do contato
+    if event_type == "PresenceChatCallback":
+        status = payload.get("status") or "DESCONHECIDO"
+        last_seen = payload.get("lastSeen")
+
+        status_label = {
+            "AVAILABLE": "online/disponível",
+            "UNAVAILABLE": "offline/indisponível",
+            "TYPING": "digitando",
+            "RECORDING": "gravando áudio",
+        }.get(status, status)
+
+        summary.update({
+            "title": f"Presença do contato: {status_label}",
+            "description": f"Contato {phone} está {status_label}. Última visualização: {last_seen or 'não informada'}",
+            "emoji": "👀",
+            "category": "presence",
+            "important": False,
+        })
+        return summary
+
+    # Mensagem de texto recebida
+    text_message = (
+        payload.get("text", {}).get("message")
+        if isinstance(payload.get("text"), dict)
+        else payload.get("text")
+    )
+
+    if text_message:
+        summary.update({
+            "title": "Mensagem recebida",
+            "description": f'{phone}: "{text_message}"',
+            "emoji": "📩",
+            "category": "received_message",
+            "important": True,
+        })
+        return summary
+
+    # Botão/lista recebida
+    button_id = None
+    button_title = None
+
+    if isinstance(payload.get("buttonReply"), dict):
+        button_id = payload["buttonReply"].get("id")
+        button_title = payload["buttonReply"].get("title")
+
+    if isinstance(payload.get("listResponseMessage"), dict):
+        button_id = payload["listResponseMessage"].get("selectedRowId")
+        button_title = payload["listResponseMessage"].get("title")
+
+    if button_id or button_title:
+        summary.update({
+            "title": "Resposta de botão recebida",
+            "description": f"{phone}: {button_title or button_id}",
+            "emoji": "🟢",
+            "category": "button_reply",
+            "important": True,
+        })
+        return summary
+
+    # Localização recebida com data e hora
+    location = payload.get("location")
+    if isinstance(location, dict):
+        latitude = location.get("latitude")
+        longitude = location.get("longitude")
+
+        summary.update({
+            "title": "Localização recebida com data e hora",
+            "description": f"{phone}: latitude {latitude}, longitude {longitude}",
+            "emoji": "📍",
+            "category": "location",
+            "important": True,
+        })
+        return summary
+
+    # Fallback
+    summary.update({
+        "title": f"Evento técnico: {event_type}",
+        "description": f"Evento técnico recebido de {phone or 'telefone não informado'}.",
+        "emoji": "⚙️",
+        "category": "technical",
+        "important": False,
+    })
+
+    return summary
+
 def create_app() -> Flask:
     app = Flask(__name__)
 
@@ -1379,6 +1540,7 @@ def create_app() -> Flask:
             {
                 "received_at": datetime.now().strftime("%d/%m/%Y %H:%M:%S"),
                 "payload": payload,
+                            "summary": get_payload_summary(payload),
             }
         )
 
@@ -1406,6 +1568,7 @@ def create_app() -> Flask:
                             "received_at": datetime.now().strftime("%d/%m/%Y %H:%M:%S"),
                             "payload": {
                                 "type": "AutoReply",
+                                "summary_label": "🤖 Resposta automática enviada",
                                 "phone": phone,
                                 "status": "terms_accepted",
                                 "text": {"message": reply},
@@ -1433,6 +1596,7 @@ def create_app() -> Flask:
                             "received_at": datetime.now().strftime("%d/%m/%Y %H:%M:%S"),
                             "payload": {
                                 "type": "AutoReply",
+                                "summary_label": "🤖 Resposta automática enviada",
                                 "phone": phone,
                                 "status": "terms_rejected",
                                 "text": {"message": reply},
@@ -1476,13 +1640,28 @@ def create_app() -> Flask:
                 )
 
                 try:
-                    reply = build_checkin_reply("location_received")
+                    confirmado_em = datetime.now().strftime("%d/%m/%Y às %H:%M:%S")
+                    location_info = state.get("location", {}) if isinstance(state, dict) else {}
+                    address_msg = (
+                        location_info.get("address")
+                        or location_info.get("maps_url")
+                        or location_info.get("url")
+                        or "Localização recebida"
+                    )
+
+                    reply = (
+                        "Sua localização foi registrada com sucesso.\n"
+                        f"Data/Hora: {confirmado_em}\n"
+                        f"Local aproximado: {address_msg}\n"
+                        "Obrigado pelas informações."
+                    )
                     response_payload = send_zapi_text(phone, reply)
                     RECEIVED_EVENTS.appendleft(
                         {
                             "received_at": datetime.now().strftime("%d/%m/%Y %H:%M:%S"),
                             "payload": {
                                 "type": "AutoReply",
+                                "summary_label": "🤖 Resposta automática enviada",
                                 "phone": phone,
                                 "status": "location_received",
                                 "text": {"message": reply},
@@ -1491,7 +1670,7 @@ def create_app() -> Flask:
                         }
                     )
                 except (RuntimeError, requests.RequestException, ValueError) as exc:
-                    logger.exception("Erro ao confirmar localização recebida: %s", exc)
+                    logger.exception("Erro ao confirmar Localização recebida com data e hora: %s", exc)
 
             elif phone and decision and not payload.get("isGroup"):
                 state = update_agenda_state(phone, decision, text)
@@ -1504,6 +1683,7 @@ def create_app() -> Flask:
                             "received_at": datetime.now().strftime("%d/%m/%Y %H:%M:%S"),
                             "payload": {
                                 "type": "AutoReply",
+                                "summary_label": "🤖 Resposta automática enviada",
                                 "phone": phone,
                                 "status": state["status"],
                                 "text": {"message": reply},
@@ -1537,14 +1717,7 @@ def create_app() -> Flask:
                 )
 
                 try:
-                    if checkin_decision == "arrived_link":
-                        location_url = create_location_link(phone)
-                        reply = (
-                            "Perfeito. Clique no link abaixo para confirmar sua localização:\n"
-                            f"{location_url}"
-                        )
-                        response_payload = send_zapi_text(phone, reply)
-                    elif checkin_decision == "arrived" and state.get("mode") == "checkin2":
+                    if should_send_location_link(checkin_decision, state):
                         location_url = create_location_link(phone)
                         reply = (
                             "Perfeito. Clique no link abaixo para confirmar sua localização:\n"
@@ -1566,6 +1739,7 @@ def create_app() -> Flask:
                             "received_at": datetime.now().strftime("%d/%m/%Y %H:%M:%S"),
                             "payload": {
                                 "type": "AutoReply",
+                                "summary_label": "🤖 Resposta automática enviada",
                                 "phone": phone,
                                 "status": checkin_decision,
                                 "text": {"message": reply},
@@ -1581,6 +1755,7 @@ def create_app() -> Flask:
                 "ok": True,
                 "message": "Evento recebido com sucesso",
                 "payload": payload,
+                            "summary": get_payload_summary(payload),
             }
         ), 200
 
@@ -1667,8 +1842,11 @@ def create_app() -> Flask:
             }
         )
 
+        confirmado_em = datetime.now().strftime("%d/%m/%Y às %H:%M:%S")
+
         reply = (
             "Sua localização foi registrada com sucesso.\n"
+            f"Data/Hora: {confirmado_em}\n"
             f"Local aproximado: {address or maps_url}\n"
             "Obrigado pelas informações."
         )
@@ -1679,6 +1857,7 @@ def create_app() -> Flask:
                     "received_at": datetime.now().strftime("%d/%m/%Y %H:%M:%S"),
                     "payload": {
                         "type": "AutoReply",
+                                "summary_label": "🤖 Resposta automática enviada",
                         "phone": phone,
                         "status": "location_received",
                         "text": {"message": reply},
@@ -1689,7 +1868,11 @@ def create_app() -> Flask:
         except (RuntimeError, requests.RequestException, ValueError) as exc:
             logger.exception("Erro ao confirmar localização do link: %s", exc)
 
-        return jsonify({"ok": True, "message": "Localização enviada. Obrigado!"}), 200
+        return jsonify({
+            "ok": True,
+            "message": "Localização enviada. Obrigado!",
+            "confirmado_em": confirmado_em
+        }), 200
 
     @app.get("/api/events")
     def list_events():
@@ -1837,3 +2020,14 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
+
+
+
+
+
+
+
+
+
+
