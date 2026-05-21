@@ -32,6 +32,7 @@ PUBLIC_BASE_URL = os.getenv("PUBLIC_BASE_URL", DEFAULT_PUBLIC_BASE_URL).strip().
 TERMS_PDF_PATH = PROJECT_DIR / "termo_aceite_ficticio.pdf"
 TERMS_ACCEPTANCE_TEXT = "li e aceito os termos"
 TERMS_REJECTION_TEXT = "não aceito os termos"
+LOCAL_HOSTS = {"localhost", "127.0.0.1", "0.0.0.0"}
 
 
 CHAT_HTML = """
@@ -521,8 +522,8 @@ Endereço: ${location.address || ""}`
           ? "Termo enviado"
           : "Mensagem enviada";
         setNotice(`${label}. ID: ${data.response.messageId || data.response.id || "sem id"}`, "ok");
-        if (mode === "agenda" || mode === "checkin" || mode === "terms") {
-          agendaStatus.textContent = mode === "checkin" ? "Check-in enviado" : mode === "terms" ? "Aguardando aceite" : "Aguardando resposta";
+        if (mode === "agenda" || mode === "checkin" || mode === "checkin2" || mode === "terms") {
+          agendaStatus.textContent = mode === "checkin" || mode === "checkin2" ? "Check-in enviado" : mode === "terms" ? "Aguardando aceite" : "Aguardando resposta";
         }
         if (mode !== "agenda") {
           messageInput.value = "";
@@ -817,6 +818,26 @@ def build_terms_message(data: dict[str, str]) -> str:
     )
 
 
+def is_public_browser_url(url: str) -> bool:
+    lowered = url.lower()
+    return (
+        lowered.startswith("https://")
+        and "ngrok" not in lowered
+        and not any(host in lowered for host in LOCAL_HOSTS)
+    )
+
+
+def get_location_link_base_url() -> str:
+    request_base_url = request.host_url.strip().rstrip("/")
+    if is_public_browser_url(request_base_url):
+        return request_base_url
+
+    if is_public_browser_url(PUBLIC_BASE_URL):
+        return PUBLIC_BASE_URL
+
+    return PUBLIC_BASE_URL or request_base_url or f"http://localhost:{PORT}"
+
+
 def create_location_link(phone: str) -> str:
     token = uuid.uuid4().hex
     LOCATION_LINKS[token] = {
@@ -824,7 +845,7 @@ def create_location_link(phone: str) -> str:
         "created_at": datetime.now().strftime("%d/%m/%Y %H:%M:%S"),
         "status": "pending",
     }
-    base_url = PUBLIC_BASE_URL or f"http://localhost:{PORT}"
+    base_url = get_location_link_base_url()
     return f"{base_url}/checkin-location/{token}"
 
 
