@@ -10,7 +10,7 @@ from typing import Any
 
 import requests
 from dotenv import load_dotenv
-from flask import Flask, jsonify, render_template_string, request
+from flask import Flask, jsonify, render_template_string, request, send_from_directory
 from pyngrok import ngrok
 from pyngrok.conf import PyngrokConfig
 from pyngrok.exception import PyngrokError
@@ -60,11 +60,27 @@ CHAT_HTML = """
     }
     header {
       display: flex;
+      align-items: center;
       justify-content: space-between;
       gap: 12px;
       padding: 10px 14px;
       color: #fff;
       background: linear-gradient(180deg, #23845a, #145a3b);
+    }
+    .brand {
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+      min-width: 0;
+    }
+    .brand-logo {
+      width: 42px;
+      height: 42px;
+      border-radius: 4px;
+      background: #fff;
+      object-fit: contain;
+      padding: 4px;
+      flex: 0 0 auto;
     }
     h1 { margin: 0; font-size: 18px; letter-spacing: 0; }
     .status { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; }
@@ -187,6 +203,7 @@ CHAT_HTML = """
       main { grid-template-columns: 1fr; }
       .composer { border-right: 0; border-bottom: 1px solid #b8c4d8; }
       header { align-items: flex-start; flex-direction: column; }
+      .brand-logo { width: 38px; height: 38px; }
       .timeline { max-height: none; }
     }
   </style>
@@ -194,7 +211,10 @@ CHAT_HTML = """
 <body>
   <div class="shell">
     <header>
-      <h1>Nova Guarda Chat</h1>
+      <div class="brand">
+        <img class="brand-logo" src="/favicon/GuardaNova.svg" alt="Logo Guarda Nova Santos">
+        <h1>Nova Guarda Chat</h1>
+      </div>
       <div class="status"><span class="dot"></span> online na porta {{ port }}</div>
     </header>
     <main>
@@ -1525,6 +1545,10 @@ def get_payload_summary(payload: dict[str, Any]) -> dict[str, Any]:
 def create_app() -> Flask:
     app = Flask(__name__)
 
+    @app.get("/favicon/<path:filename>")
+    def favicon_asset(filename: str):
+        return send_from_directory(str(PROJECT_DIR / "favicon"), filename)
+
     @app.post(WEBHOOK_PATH)
     def webhook():
         payload = request.get_json(silent=True)
@@ -1872,8 +1896,7 @@ def create_app() -> Flask:
             "ok": True,
             "message": "Localização enviada. Obrigado!",
             "confirmado_em": confirmado_em
-        }), 200
-
+        }), 200
     @app.get("/api/events")
     def list_events():
         return jsonify({"events": list(RECEIVED_EVENTS)}), 200
@@ -2020,6 +2043,10 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
+
+
+
 
 
 

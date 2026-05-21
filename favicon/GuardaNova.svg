@@ -1,0 +1,7 @@
+﻿<svg xmlns="http://www.w3.org/2000/svg" width="220" height="60" viewBox="0 0 220 60">
+  <rect width="220" height="60" rx="12" fill="#17623f"/>
+  <circle cx="32" cy="30" r="18" fill="#ffffff"/>
+  <path d="M32 15 L46 24 V36 L32 45 L18 36 V24 Z" fill="#17623f"/>
+  <text x="62" y="25" font-family="Arial, sans-serif" font-size="16" font-weight="700" fill="#ffffff">Guarda Nova</text>
+  <text x="62" y="43" font-family="Arial, sans-serif" font-size="13" fill="#d9f2e5">Santos</text>
+</svg>
