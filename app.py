@@ -461,6 +461,7 @@ Esse aceite será registrado no sistema.`;
           : location?.url || "";
         const body = location
           ? `Localização recebida com data e hora
+Data/Hora: ${location.received_at || event.received_at || ""}
 Latitude: ${location.latitude ?? ""}
 Longitude: ${location.longitude ?? ""}
 Endereço: ${location.address || ""}`
@@ -1652,6 +1653,7 @@ def create_app() -> Flask:
                     "address": location.get("address", ""),
                     "url": location.get("url", ""),
                     "maps_url": f"https://www.google.com/maps?q={latitude},{longitude}" if latitude and longitude else "",
+                    "received_at": state["updated_at"],
                 }
                 state["updated_at"] = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
                 state.setdefault("history", []).append(
@@ -1673,10 +1675,14 @@ def create_app() -> Flask:
                         or "Localização recebida"
                     )
 
+                    data_confirmacao = datetime.now().strftime("%d/%m/%Y")
+                    hora_confirmacao = datetime.now().strftime("%H:%M:%S")
+
                     reply = (
-                        "Sua localização foi registrada com sucesso.\n"
-                        f"Data/Hora: {confirmado_em}\n"
-                        f"Local aproximado: {address_msg}\n"
+                        "Sua localização foi registrada com sucesso.\n\n"
+                        f"Data: {data_confirmacao}\n"
+                        f"Horário: {hora_confirmacao}\n"
+                        f"Local aproximado: {address_msg}\n\n"
                         "Obrigado pelas informações."
                     )
                     response_payload = send_zapi_text(phone, reply)
@@ -1826,11 +1832,12 @@ def create_app() -> Flask:
             "accuracy": accuracy,
             "address": address,
             "maps_url": maps_url,
+            "received_at": datetime.now().strftime("%d/%m/%Y %H:%M:%S"),
         }
 
         link["status"] = "received"
         link["location"] = location_payload
-        link["received_at"] = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
+        link["received_at"] = location_payload["received_at"]
 
         state = AGENDA_STATE.setdefault(
             phone,
@@ -1866,12 +1873,15 @@ def create_app() -> Flask:
             }
         )
 
-        confirmado_em = datetime.now().strftime("%d/%m/%Y às %H:%M:%S")
+        data_confirmacao = datetime.now().strftime("%d/%m/%Y")
+        hora_confirmacao = datetime.now().strftime("%H:%M:%S")
+        confirmado_em = f"{data_confirmacao} às {hora_confirmacao}"
 
         reply = (
-            "Sua localização foi registrada com sucesso.\n"
-            f"Data/Hora: {confirmado_em}\n"
-            f"Local aproximado: {address or maps_url}\n"
+            "Sua localização foi registrada com sucesso.\n\n"
+            f"Data: {data_confirmacao}\n"
+            f"Horário: {hora_confirmacao}\n"
+            f"Local aproximado: {address or maps_url}\n\n"
             "Obrigado pelas informações."
         )
         try:
@@ -1896,7 +1906,8 @@ def create_app() -> Flask:
             "ok": True,
             "message": "Localização enviada. Obrigado!",
             "confirmado_em": confirmado_em
-        }), 200
+        }), 200
+
     @app.get("/api/events")
     def list_events():
         return jsonify({"events": list(RECEIVED_EVENTS)}), 200
@@ -2020,7 +2031,10 @@ def main() -> None:
     load_dotenv(encoding="utf-8-sig")
 
     try:
-        if PUBLIC_BASE_URL:
+        if os.getenv("LOCAL_ONLY", "").strip() == "1":
+            PUBLIC_BASE_URL = os.getenv("PUBLIC_BASE_URL", f"http://127.0.0.1:{PORT}").strip().rstrip("/")
+            logger.info("Modo local ativo. Ngrok/webhook não serão atualizados.")
+        elif PUBLIC_BASE_URL:
             logger.info("Usando URL pública configurada: %s", PUBLIC_BASE_URL)
             update_zapi_webhook(PUBLIC_BASE_URL)
         else:
@@ -2043,6 +2057,7 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
 
 
 
