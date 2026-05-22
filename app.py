@@ -166,6 +166,7 @@ CHAT_HTML = """
     .event.received { justify-self: start; }
     .event.system { justify-self: center; max-width: 100%; background: #f7f9fc; }
     .event.sent { justify-self: end; background: #e6f6ed; }
+    .event.auto { justify-self: end; background: #edf7ff; }
     .event-head {
       display: flex;
       justify-content: space-between;
@@ -179,6 +180,20 @@ CHAT_HTML = """
     }
     pre { margin: 0; padding: 10px; white-space: pre-wrap; overflow-wrap: anywhere; font: 12px/1.45 Consolas, "Courier New", monospace; }
     .message-text { padding: 10px; line-height: 1.45; white-space: pre-wrap; overflow-wrap: anywhere; }
+    .event-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      padding: 0 10px 10px;
+    }
+    .action-button {
+      width: auto;
+      padding: 6px 9px;
+      border-color: #b8c4d8;
+      background: #fff;
+      color: #17623f;
+      font-size: 12px;
+    }
     .decision {
       display: inline-block;
       margin: 0 10px 10px;
@@ -308,8 +323,10 @@ CHAT_HTML = """
       if (savedAgenda[field.name]) field.value = savedAgenda[field.name];
     });
 
+    let currentEvents = [];
+
     function escapeHtml(value) {
-      return value.replace(/[&<>"']/g, (char) => ({
+      return String(value ?? "").replace(/[&<>"']/g, (char) => ({
         "&": "&amp;",
         "<": "&lt;",
         ">": "&gt;",
@@ -325,6 +342,43 @@ CHAT_HTML = """
 
     function getMessageText(payload) {
       return payload?.text?.message || payload?.buttonReply?.message || payload?.buttonsResponseMessage?.selectedDisplayText || payload?.listResponseMessage?.title || "";
+    }
+
+    function getEventKind(payload) {
+      if (payload.type === "SentMessage") return "sent";
+      if (payload.type === "AutoReply") return "auto";
+      if (payload.type === "ReceivedCallback") return "received";
+      return "system";
+    }
+
+    function getEventTitle(payload) {
+      if (payload.summary_label) return payload.summary_label;
+      if (payload.type === "SentMessage") return `Enviado para ${payload.phone || "contato"}`;
+      if (payload.type === "AutoReply") return `Resposta automática para ${payload.phone || "contato"}`;
+      if (payload.type === "LocationLinkCallback") return `Localização confirmada por ${payload.phone || "contato"}`;
+      if (payload.type === "ReceivedCallback") return `${payload.chatName || payload.senderName || payload.phone || "Contato"}`;
+      return payload.type || "Evento";
+    }
+
+    function getEventBody(payload, event) {
+      const text = getMessageText(payload);
+      const location = payload.location || null;
+      if (location) {
+        return `Localização recebida com data e hora
+Data/Hora: ${location.received_at || event.received_at || ""}
+Latitude: ${location.latitude ?? ""}
+Longitude: ${location.longitude ?? ""}
+Endereço: ${location.address || ""}`;
+      }
+      if (text) return text;
+      return JSON.stringify(payload, null, 2);
+    }
+
+    function getMapsUrl(payload) {
+      const location = payload.location || null;
+      if (!location) return "";
+      if (location.latitude && location.longitude) return `https://www.google.com/maps?q=${location.latitude},${location.longitude}`;
+      return location.url || location.maps_url || "";
     }
 
     function getDecision(text) {
@@ -439,40 +493,32 @@ Esse aceite será registrado no sistema.`;
     }
 
     function renderEvents(events) {
+      currentEvents = events;
       if (!events.length) {
         timeline.innerHTML = '<div class="empty">Nenhuma resposta recebida ainda.</div>';
         return;
       }
 
-      timeline.innerHTML = events.map((event) => {
+      timeline.innerHTML = events.map((event, index) => {
         const payload = event.payload || {};
-        const isSent = payload.type === "SentMessage";
-        const isMessage = payload.type === "ReceivedCallback" || isSent;
+        const kind = getEventKind(payload);
         const text = getMessageText(payload);
-        const location = payload.location || null;
         const decision = getDecision(text);
-        const title = isSent
-          ? `Enviado para ${payload.phone || "contato"}`
-          : isMessage
-          ? `${payload.chatName || payload.senderName || payload.phone || "Contato"}`
-          : `${payload.type || "Evento"}`;
-        const mapsUrl = location?.latitude && location?.longitude
-          ? `https://www.google.com/maps?q=${location.latitude},${location.longitude}`
-          : location?.url || "";
-        const body = location
-          ? `Localização recebida com data e hora
-Data/Hora: ${location.received_at || event.received_at || ""}
-Latitude: ${location.latitude ?? ""}
-Longitude: ${location.longitude ?? ""}
-Endereço: ${location.address || ""}`
-          : isMessage && text ? text : JSON.stringify(payload, null, 2);
+        const title = getEventTitle(payload);
+        const mapsUrl = getMapsUrl(payload);
+        const body = getEventBody(payload, event);
+        const canReuse = Boolean(text) && payload.type !== "ReceivedCallback";
 
         return `
-          <article class="event ${isSent ? "sent" : isMessage ? "received" : "system"}">
+          <article class="event ${kind}">
             <div class="event-head"><span>${escapeHtml(event.received_at)}</span><span>${escapeHtml(title)}</span></div>
             <div class="message-text">${escapeHtml(body)}</div>
             ${decision ? `<span class="decision">${decision}</span>` : ""}
-            ${mapsUrl ? `<a class="map-link" href="${escapeHtml(mapsUrl)}" target="_blank" rel="noreferrer">Abrir no mapa</a>` : ""}
+            <div class="event-actions">
+              <button class="action-button" type="button" data-action="copy" data-index="${index}">Copiar resposta</button>
+              ${canReuse ? `<button class="action-button" type="button" data-action="reuse" data-index="${index}">Usar no campo</button>` : ""}
+              ${mapsUrl ? `<button class="action-button" type="button" data-action="map" data-index="${index}">Abrir mapa</button>` : ""}
+            </div>
             <details>
               <summary>Ver payload completo</summary>
               <pre>${escapeHtml(JSON.stringify(payload, null, 2))}</pre>
@@ -486,6 +532,30 @@ Endereço: ${location.address || ""}`
         agendaStatus.textContent = getDecision(getMessageText(latestDecision.payload || {}));
       }
     }
+
+    timeline.addEventListener("click", async (event) => {
+      const actionButton = event.target.closest("[data-action]");
+      if (!actionButton) return;
+
+      const item = currentEvents[Number(actionButton.dataset.index)];
+      if (!item) return;
+
+      const payload = item.payload || {};
+      const body = getEventBody(payload, item);
+      const mapsUrl = getMapsUrl(payload);
+      const action = actionButton.dataset.action;
+
+      if (action === "copy") {
+        await navigator.clipboard.writeText(body);
+        setNotice("Resposta copiada do histórico.", "ok");
+      } else if (action === "reuse") {
+        messageInput.value = body;
+        messageInput.focus();
+        setNotice("Resposta carregada no campo de mensagem.", "ok");
+      } else if (action === "map" && mapsUrl) {
+        window.open(mapsUrl, "_blank", "noreferrer");
+      }
+    });
 
     async function loadEvents() {
       const response = await fetch("/api/events");
@@ -1680,6 +1750,7 @@ def create_app() -> Flask:
 
                     reply = (
                         "Sua localização foi registrada com sucesso.\n\n"
+                        "VERSÃO LOCAL COM DATA/HORA\n"
                         f"Data: {data_confirmacao}\n"
                         f"Horário: {hora_confirmacao}\n"
                         f"Local aproximado: {address_msg}\n\n"
@@ -1879,6 +1950,7 @@ def create_app() -> Flask:
 
         reply = (
             "Sua localização foi registrada com sucesso.\n\n"
+            "VERSÃO LOCAL COM DATA/HORA\n"
             f"Data: {data_confirmacao}\n"
             f"Horário: {hora_confirmacao}\n"
             f"Local aproximado: {address or maps_url}\n\n"
