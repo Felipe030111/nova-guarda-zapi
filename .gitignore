@@ -6,3 +6,10 @@ app_backup*.py
 VARREDURA_COMPLETA_NOVA_GUARDA_*.txt
 MAPEAMENTO_PROJETO_*.txt
 ngrok.exe
+
+# Backups e patches locais
+app_backup_*.py
+patch_*.py
+MAPEAMENTO_*.txt
+VARREDURA_COMPLETA_*.txt
+_LIXEIRA_LIMPEZA_*/
