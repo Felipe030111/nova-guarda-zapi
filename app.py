@@ -975,6 +975,17 @@ def create_location_link(phone: str) -> str:
     return f"{base_url}/checkin-location/{token}"
 
 
+def build_location_confirmation_message(address: str) -> tuple[str, str]:
+    confirmed_at = datetime.now().strftime("%d/%m/%Y às %H:%M:%S")
+    reply = (
+        "Sua localização foi registrada com sucesso.\n"
+        f"Data/Hora: {confirmed_at}\n"
+        f"Local aproximado: {address}\n"
+        "Obrigado pelas informações."
+    )
+    return reply, confirmed_at
+
+
 def reverse_geocode(latitude: float, longitude: float) -> str:
     try:
         response = requests.get(
@@ -1736,7 +1747,6 @@ def create_app() -> Flask:
                 )
 
                 try:
-                    confirmado_em = datetime.now().strftime("%d/%m/%Y às %H:%M:%S")
                     location_info = state.get("location", {}) if isinstance(state, dict) else {}
                     address_msg = (
                         location_info.get("address")
@@ -1745,17 +1755,7 @@ def create_app() -> Flask:
                         or "Localização recebida"
                     )
 
-                    data_confirmacao = datetime.now().strftime("%d/%m/%Y")
-                    hora_confirmacao = datetime.now().strftime("%H:%M:%S")
-
-                    reply = (
-                        "Sua localização foi registrada com sucesso.\n\n"
-                        "VERSÃO LOCAL COM DATA/HORA\n"
-                        f"Data: {data_confirmacao}\n"
-                        f"Horário: {hora_confirmacao}\n"
-                        f"Local aproximado: {address_msg}\n\n"
-                        "Obrigado pelas informações."
-                    )
+                    reply, confirmado_em = build_location_confirmation_message(address_msg)
                     response_payload = send_zapi_text(phone, reply)
                     RECEIVED_EVENTS.appendleft(
                         {
@@ -1944,18 +1944,7 @@ def create_app() -> Flask:
             }
         )
 
-        data_confirmacao = datetime.now().strftime("%d/%m/%Y")
-        hora_confirmacao = datetime.now().strftime("%H:%M:%S")
-        confirmado_em = f"{data_confirmacao} às {hora_confirmacao}"
-
-        reply = (
-            "Sua localização foi registrada com sucesso.\n\n"
-            "VERSÃO LOCAL COM DATA/HORA\n"
-            f"Data: {data_confirmacao}\n"
-            f"Horário: {hora_confirmacao}\n"
-            f"Local aproximado: {address or maps_url}\n\n"
-            "Obrigado pelas informações."
-        )
+        reply, confirmado_em = build_location_confirmation_message(address or maps_url)
         try:
             response_payload = send_zapi_text(phone, reply)
             RECEIVED_EVENTS.appendleft(
